@@ -1,4 +1,4 @@
-# 工序按键引导程序 (Process Key Guide) - SAAP格式
+#Skill Axis Assistance Prompt
 
 一个专业的GUI应用程序，用于录制、管理和引导用户按特定顺序执行键盘鼠标操作。支持组合键、鼠标事件和自定义引导提示。
 
@@ -232,7 +232,7 @@ dist/ProcessKeyGuide-windows.zip # 打包文件
 ## 📞 联系方式
 
 - **GitHub Issues**: [报告问题](https://github.com/yourusername/process-key-guide/issues)
-- **邮箱**: your-email@example.com
+- **邮箱**: xiaoduXX@163.com
 - **讨论区**: [GitHub Discussions](https://github.com/yourusername/process-key-guide/discussions)
 
 ## 🙏 致谢
