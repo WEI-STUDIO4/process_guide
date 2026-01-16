@@ -1,0 +1,15 @@
+# 工序按键引导程序依赖
+
+# 核心依赖
+keyboard>=0.13.5  # 全局键盘钩子，用于按键录制功能
+mouse>=0.7.1      # 全局鼠标钩子，用于鼠标事件录制功能
+
+# 可选依赖（用于打包）
+# pyinstaller>=5.0  # 打包为可执行文件
+
+# 运行要求：
+# Python 3.6+
+# tkinter (通常Python自带)
+
+# 安装命令：
+# pip install -r requirements.txt
