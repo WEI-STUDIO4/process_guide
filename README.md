@@ -1,4 +1,4 @@
-#Skill Axis Assistance Prompt
+# Skill Axis Assistance Prompt
 
 一个专业的GUI应用程序，用于录制、管理和引导用户按特定顺序执行键盘鼠标操作。支持组合键、鼠标事件和自定义引导提示。
 
