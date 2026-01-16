@@ -7,13 +7,31 @@ on:
   workflow_dispatch:  # 允许手动触发
     inputs:
       version:
-        description: '版本号 (例如: v1.0.0)'
+        description: '版本号 (例如: v2.0.0)'
         required: true
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'windows'
+          - 'macos'
+          - 'linux'
+
+env:
+  APP_NAME: "SkillAxisAssistancePrompt"
+  APP_DISPLAY_NAME: "Skill Axis Assistance Prompt"
+  APP_DESCRIPTION: "游戏技能轴辅助提示工具 - 帮助玩家记忆和执行技能序列"
+  COMPANY_NAME: "SAAP Team"
+  COPYRIGHT: "Copyright © 2026 SAAP Team. 专为游戏玩家设计。"
 
 jobs:
   build-windows:
     name: Build for Windows
     runs-on: windows-latest
+    if: github.event.inputs.build_type == 'all' || github.event.inputs.build_type == 'windows'
     
     steps:
     - name: Checkout code
@@ -29,17 +47,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pyinstaller
-        pip install pyinstaller-versionfile  # 用于创建版本信息文件
     
-    - name: Create version info file (Windows)
+    - name: Create version info file
       run: |
         $version = if ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
         $version = $version -replace '^v', ''
         @"
         # UTF-8
-        #
-        # For more details about fixed file info 'ffi' see:
-        # https://learn.microsoft.com/en-us/windows/win32/menurc/vs-versioninfo-resource
         VSVersionInfo(
           ffi=FixedFileInfo(
             filevers=($version.Split('.') + @(0, 0))[0..3],
@@ -55,13 +69,13 @@ jobs:
             StringFileInfo([
               StringTable(
                 u'040904B0',
-                [StringStruct(u'CompanyName', u'Process Key Guide'),
-                StringStruct(u'FileDescription', u'工序按键引导程序'),
+                [StringStruct(u'CompanyName', u'${{ env.COMPANY_NAME }}'),
+                StringStruct(u'FileDescription', u'${{ env.APP_DESCRIPTION }}'),
                 StringStruct(u'FileVersion', u'$version'),
-                StringStruct(u'InternalName', u'ProcessKeyGuide'),
-                StringStruct(u'LegalCopyright', u'Copyright © 2026 Process Key Guide Team'),
-                StringStruct(u'OriginalFilename', u'ProcessKeyGuide.exe'),
-                StringStruct(u'ProductName', u'Process Key Guide'),
+                StringStruct(u'InternalName', u'${{ env.APP_NAME }}'),
+                StringStruct(u'LegalCopyright', u'${{ env.COPYRIGHT }}'),
+                StringStruct(u'OriginalFilename', u'${{ env.APP_NAME }}.exe'),
+                StringStruct(u'ProductName', u'${{ env.APP_DISPLAY_NAME }}'),
                 StringStruct(u'ProductVersion', u'$version')])
             ]),
             VarFileInfo([VarStruct(u'Translation', [0x409, 1200])])
@@ -69,116 +83,174 @@ jobs:
         )
         "@ | Out-File -FilePath version_info.txt -Encoding UTF8
     
-    - name: Build with PyInstaller
+    - name: Build executable with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "ProcessKeyGuide" ^
-          --icon "assets/icon.ico" ^
+        pyinstaller --onefile --windowed --name "${{ env.APP_NAME }}" ^
           --version-file "version_info.txt" ^
           --hidden-import "keyboard" ^
           --hidden-import "mouse" ^
           --add-data "README.md;." ^
           --add-data "requirements.txt;." ^
+          --add-data "docs;docs" ^
           "process_guide.py"
     
-    - name: Create Windows installer (可选，使用NSIS)
-      if: success()
+    - name: Create README for distribution
       run: |
-        # 安装NSIS
-        choco install nsis -y
-        
-        # 创建NSIS脚本
         @"
-        ; NSIS 安装脚本
-        Unicode true
-        Name "Process Key Guide"
-        OutFile "dist\ProcessKeyGuide-Setup.exe"
-        InstallDir "$PROGRAMFILES\Process Key Guide"
+        # Skill Axis Assistance Prompt (SAAP)
         
-        ; 现代UI 2
-        !include "MUI2.nsh"
+        ## 🎮 游戏技能轴辅助提示工具
         
-        ; 安装页面设置
-        !insertmacro MUI_PAGE_WELCOME
-        !insertmacro MUI_PAGE_DIRECTORY
-        !insertmacro MUI_PAGE_INSTFILES
-        !insertmacro MUI_PAGE_FINISH
+        ### 主要功能
+        - 🎯 智能录制技能序列
+        - ⌨️ 支持组合键和鼠标操作
+        - 🔄 循环训练模式
+        - 🎨 可自定义提示窗口
         
-        ; 卸载页面设置
-        !insertmacro MUI_UNPAGE_WELCOME
-        !insertmacro MUI_UNPAGE_CONFIRM
-        !insertmacro MUI_UNPAGE_INSTFILES
-        !insertmacro MUI_UNPAGE_FINISH
+        ### 快速开始
+        1. 运行 ${{ env.APP_NAME }}.exe
+        2. 录制你的技能序列
+        3. 开始训练
         
-        ; 设置语言
-        !insertmacro MUI_LANGUAGE "English"
-        !insertmacro MUI_LANGUAGE "SimpChinese"
+        ### 游戏应用场景
+        - MOBA游戏：连招技能序列
+        - MMORPG：职业技能循环
+        - FPS游戏：装备切换顺序
+        - RTS游戏：单位生产序列
         
-        Section "Main"
-          SetOutPath "$INSTDIR"
-          
-          ; 复制文件
-          File "dist\ProcessKeyGuide.exe"
-          File "README.md"
-          File "LICENSE"
-          
-          ; 创建开始菜单快捷方式
-          CreateDirectory "$SMPROGRAMS\Process Key Guide"
-          CreateShortCut "$SMPROGRAMS\Process Key Guide\Process Key Guide.lnk" "$INSTDIR\ProcessKeyGuide.exe"
-          CreateShortCut "$SMPROGRAMS\Process Key Guide\Uninstall.lnk" "$INSTDIR\uninstall.exe"
-          
-          ; 写入卸载信息
-          WriteUninstaller "$INSTDIR\uninstall.exe"
-          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
-            "DisplayName" "Process Key Guide"
-          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
-            "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
-            "Publisher" "Process Key Guide Team"
-          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
-            "DisplayVersion" "$version"
-        SectionEnd
+        ### 系统要求
+        - Windows 10 或更高版本
+        - 无需管理员权限
         
-        Section "Uninstall"
-          ; 删除文件
-          Delete "$INSTDIR\ProcessKeyGuide.exe"
-          Delete "$INSTDIR\README.md"
-          Delete "$INSTDIR\LICENSE"
-          Delete "$INSTDIR\uninstall.exe"
-          
-          ; 删除目录
-          RMDir "$INSTDIR"
-          
-          ; 删除开始菜单快捷方式
-          Delete "$SMPROGRAMS\Process Key Guide\Process Key Guide.lnk"
-          Delete "$SMPROGRAMS\Process Key Guide\Uninstall.lnk"
-          RMDir "$SMPROGRAMS\Process Key Guide"
-          
-          ; 删除注册表项
-          DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide"
-        SectionEnd
-        "@ | Out-File -FilePath installer.nsi -Encoding UTF8
+        ### 支持与反馈
+        问题反馈请访问项目主页：
+        https://github.com/${{ github.repository }}
         
-        # 编译安装程序
-        makensis installer.nsi
+        版本: $version
+        构建时间: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        "@ | Out-File -FilePath "dist/README_GAMERS.md" -Encoding UTF8
     
-    - name: Create ZIP archive
+    - name: Create game config examples
+      run: |
+        # 创建游戏配置示例目录
+        New-Item -ItemType Directory -Force -Path "dist/game_configs"
+        
+        # MOBA游戏示例（英雄联盟）
+        @"
+        # League of Legends - Zed Combo
+        # 劫的连招序列
+        
+        [metadata]
+        game = "League of Legends"
+        champion = "Zed"
+        difficulty = "Advanced"
+        description = "Zed's full combo: W->E->Q->R->AA->Ignite"
+        author = "SAAP Team"
+        created = "$(Get-Date -Format 'yyyy-MM-dd')"
+        
+        [processes]
+        1 = "放置影分身 (W)", "W"
+        2 = "影子斩击 (E)", "E"
+        3 = "手里剑 (Q)", "Q"
+        4 = "死亡标记 (R)", "R"
+        5 = "普通攻击", "鼠标左键"
+        6 = "点燃", "D"
+        
+        [settings]
+        loop_mode = true
+        text_color = "#FF6B6B"
+        bg_color = "#2D3436"
+        transparent = false
+        loop_count = 10
+        "@ | Out-File -FilePath "dist/game_configs/lol_zed_combo.saap" -Encoding UTF8
+        
+        # MMORPG示例（魔兽世界）
+        @"
+        # World of Warcraft - Fire Mage Rotation
+        # 火法输出循环
+        
+        [metadata]
+        game = "World of Warcraft"
+        class = "Mage"
+        spec = "Fire"
+        description = "Fire Mage single target rotation"
+        author = "SAAP Team"
+        
+        [processes]
+        1 = "火球术", "1"
+        2 = "炎爆术 (触发时)", "2"
+        3 = "烈焰风暴 (AOE时)", "3"
+        4 = "燃烧", "F"
+        5 = "火焰冲击", "鼠标右键"
+        6 = "炽热连击时炎爆术", "CTRL+2"
+        
+        [settings]
+        loop_mode = true
+        text_color = "#FFA726"
+        bg_color = "#1A237E"
+        loop_count = 20
+        "@ | Out-File -FilePath "dist/game_configs/wow_fire_mage.saap" -Encoding UTF8
+        
+        # FPS游戏示例（CS:GO）
+        @"
+        # CS:GO - Weapon Switch Combo
+        # 武器切换组合
+        
+        [metadata]
+        game = "Counter-Strike: Global Offensive"
+        scenario = "Post-plant weapon switch"
+        description = "Quick weapon switching after planting bomb"
+        author = "SAAP Team"
+        
+        [processes]
+        1 = "切出手枪", "1"
+        2 = "切出刀", "3"
+        3 = "切出手枪", "1"
+        4 = "投掷闪光弹", "4"
+        5 = "切换回主武器", "滚轮向上"
+        
+        [settings]
+        loop_mode = true
+        text_color = "#4CAF50"
+        bg_color = "#212121"
+        loop_count = 15
+        "@ | Out-File -FilePath "dist/game_configs/csgo_weapon_switch.saap" -Encoding UTF8
+    
+    - name: Create Windows ZIP archive
       run: |
         $version = if ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
         $version = $version -replace '^v', ''
-        Compress-Archive -Path "dist\ProcessKeyGuide.exe", "README.md", "LICENSE" -DestinationPath "dist\ProcessKeyGuide-v$version-windows.zip" -Force
+        $zipName = "${{ env.APP_NAME }}-v$version-windows.zip"
+        
+        # 创建ZIP文件
+        Compress-Archive -Path `
+          "dist/${{ env.APP_NAME }}.exe", `
+          "dist/README_GAMERS.md", `
+          "dist/game_configs/*", `
+          "LICENSE" `
+          -DestinationPath "dist/$zipName" -Force
+        
+        # 计算SHA256校验和
+        $hash = (Get-FileHash "dist/$zipName" -Algorithm SHA256).Hash
+        "WINDOWS_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append
+        "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+        
+        Write-Host "Created: $zipName"
+        Write-Host "SHA256: $hash"
     
     - name: Upload Windows artifacts
       uses: actions/upload-artifact@v4
       with:
         name: windows-build
         path: |
-          dist/ProcessKeyGuide.exe
-          dist/ProcessKeyGuide-*.zip
-          dist/ProcessKeyGuide-Setup.exe
+          dist/${{ env.APP_NAME }}.exe
+          dist/${{ env.APP_NAME }}-*.zip
+        retention-days: 7
   
   build-macos:
     name: Build for macOS
     runs-on: macos-latest
+    if: github.event.inputs.build_type == 'all' || github.event.inputs.build_type == 'macos'
     
     steps:
     - name: Checkout code
@@ -191,43 +263,51 @@ jobs:
     
     - name: Install dependencies
       run: |
+        # 安装tkinter (macOS需要)
+        brew install python-tk
+        
         python3 -m pip install --upgrade pip
         pip3 install -r requirements.txt
         pip3 install pyinstaller
     
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "ProcessKeyGuide" \
+        pyinstaller --onefile --windowed --name "${{ env.APP_NAME }}" \
           --hidden-import "keyboard" \
           --hidden-import "mouse" \
           --add-data "README.md:." \
           --add-data "requirements.txt:." \
+          --add-data "docs:docs" \
           "process_guide.py"
     
     - name: Create macOS app bundle
       run: |
-        mkdir -p "ProcessKeyGuide.app/Contents/MacOS"
-        mkdir -p "ProcessKeyGuide.app/Contents/Resources"
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        
+        # 创建应用包结构
+        mkdir -p "${{ env.APP_DISPLAY_NAME }}.app/Contents/MacOS"
+        mkdir -p "${{ env.APP_DISPLAY_NAME }}.app/Contents/Resources"
         
         # 复制可执行文件
-        cp "dist/ProcessKeyGuide" "ProcessKeyGuide.app/Contents/MacOS/ProcessKeyGuide"
+        cp "dist/${{ env.APP_NAME }}" "${{ env.APP_DISPLAY_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}"
         
         # 创建Info.plist
-        cat > "ProcessKeyGuide.app/Contents/Info.plist" << EOF
+        cat > "${{ env.APP_DISPLAY_NAME }}.app/Contents/Info.plist" << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
           <key>CFBundleExecutable</key>
-          <string>ProcessKeyGuide</string>
+          <string>${{ env.APP_NAME }}</string>
           <key>CFBundleIdentifier</key>
-          <string>com.processkeyguide.app</string>
+          <string>com.saap.app</string>
           <key>CFBundleName</key>
-          <string>Process Key Guide</string>
+          <string>${{ env.APP_DISPLAY_NAME }}</string>
           <key>CFBundleVersion</key>
-          <string>1.0.0</string>
+          <string>$VERSION</string>
           <key>CFBundleShortVersionString</key>
-          <string>1.0.0</string>
+          <string>$VERSION</string>
           <key>CFBundlePackageType</key>
           <string>APPL</string>
           <key>LSMinimumSystemVersion</key>
@@ -235,17 +315,31 @@ jobs:
           <key>NSHighResolutionCapable</key>
           <true/>
           <key>NSHumanReadableCopyright</key>
-          <string>Copyright © 2026 Process Key Guide Team</string>
+          <string>${{ env.COPYRIGHT }}</string>
+          <key>CFBundleGetInfoString</key>
+          <string>${{ env.APP_DESCRIPTION }}</string>
+          <key>CFBundleDevelopmentRegion</key>
+          <string>English</string>
+          <key>CFBundleInfoDictionaryVersion</key>
+          <string>6.0</string>
         </dict>
         </plist>
         EOF
         
-        # 复制文档
-        cp "README.md" "ProcessKeyGuide.app/Contents/Resources/"
-        cp "LICENSE" "ProcessKeyGuide.app/Contents/Resources/"
+        # 创建PkgInfo
+        echo "APPL????" > "${{ env.APP_DISPLAY_NAME }}.app/Contents/PkgInfo"
         
         # 设置权限
-        chmod +x "ProcessKeyGuide.app/Contents/MacOS/ProcessKeyGuide"
+        chmod +x "${{ env.APP_DISPLAY_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}"
+        
+        # 复制文档和示例
+        mkdir -p "${{ env.APP_DISPLAY_NAME }}.app/Contents/Resources/game_configs"
+        cp -r "dist/game_configs"/* "${{ env.APP_DISPLAY_NAME }}.app/Contents/Resources/game_configs/" 2>/dev/null || true
+        cp "README.md" "${{ env.APP_DISPLAY_NAME }}.app/Contents/Resources/"
+        cp "LICENSE" "${{ env.APP_DISPLAY_NAME }}.app/Contents/Resources/"
+        
+        # 移动应用到dist目录
+        mv "${{ env.APP_DISPLAY_NAME }}.app" "dist/"
     
     - name: Create DMG package
       run: |
@@ -255,38 +349,61 @@ jobs:
         # 创建临时目录
         mkdir -p dmg_build
         
-        # 复制应用
-        cp -r "ProcessKeyGuide.app" dmg_build/
+        # 复制应用和文档
+        cp -r "dist/${{ env.APP_DISPLAY_NAME }}.app" dmg_build/
         cp "README.md" dmg_build/
         cp "LICENSE" dmg_build/
         
-        # 创建软链接到Applications
+        # 创建游戏配置示例目录
+        mkdir -p dmg_build/游戏配置示例
+        cp -r dist/game_configs/* dmg_build/游戏配置示例/ 2>/dev/null || true
+        
+        # 创建应用软链接
         ln -s /Applications dmg_build/
         
         # 创建DMG
-        hdiutil create -volname "Process Key Guide" \
+        hdiutil create -volname "${{ env.APP_DISPLAY_NAME }}" \
           -srcfolder dmg_build \
           -ov -format UDZO \
-          "dist/ProcessKeyGuide-v${VERSION}-macos.dmg"
+          -fs HFS+ \
+          -imagekey zlib-level=9 \
+          "dist/${{ env.APP_NAME }}-v${VERSION}-macos.dmg"
+        
+        # 计算校验和
+        DMG_HASH=$(shasum -a 256 "dist/${{ env.APP_NAME }}-v${VERSION}-macos.dmg" | awk '{print $1}')
+        echo "MACOS_DMG_SHA256=$DMG_HASH" >> $GITHUB_ENV
     
-    - name: Create ZIP archive for macOS
+    - name: Create macOS ZIP archive
       run: |
         VERSION="${{ github.event.inputs.version || github.ref_name }}"
         VERSION="${VERSION#v}"
-        cd dist && zip -r "ProcessKeyGuide-v${VERSION}-macos.zip" ProcessKeyGuide
+        
+        # 创建便携版ZIP
+        cd dist && zip -r "${{ env.APP_NAME }}-v${VERSION}-macos-portable.zip" \
+          "${{ env.APP_NAME }}" \
+          "README.md" \
+          "LICENSE" \
+          "game_configs"
+        
+        # 计算校验和
+        ZIP_HASH=$(shasum -a 256 "${{ env.APP_NAME }}-v${VERSION}-macos-portable.zip" | awk '{print $1}')
+        echo "MACOS_ZIP_SHA256=$ZIP_HASH" >> $GITHUB_ENV
     
     - name: Upload macOS artifacts
       uses: actions/upload-artifact@v4
       with:
         name: macos-build
         path: |
-          dist/ProcessKeyGuide
-          dist/ProcessKeyGuide-*.zip
-          dist/ProcessKeyGuide-*.dmg
+          dist/${{ env.APP_NAME }}
+          dist/${{ env.APP_DISPLAY_NAME }}.app
+          dist/${{ env.APP_NAME }}-*.zip
+          dist/${{ env.APP_NAME }}-*.dmg
+        retention-days: 7
   
   build-linux:
     name: Build for Linux
     runs-on: ubuntu-latest
+    if: github.event.inputs.build_type == 'all' || github.event.inputs.build_type == 'linux'
     
     steps:
     - name: Checkout code
@@ -300,58 +417,67 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk
+        sudo apt-get install -y python3-tk python3-dev
         python3 -m pip install --upgrade pip
         pip3 install -r requirements.txt
         pip3 install pyinstaller
     
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --name "ProcessKeyGuide" \
+        pyinstaller --onefile --name "${{ env.APP_NAME }}" \
           --hidden-import "keyboard" \
           --hidden-import "mouse" \
           --add-data "README.md:." \
           --add-data "requirements.txt:." \
+          --add-data "docs:docs" \
           "process_guide.py"
     
-    - name: Create AppImage (可选)
+    - name: Create Linux desktop entry
       run: |
-        VERSION="${{ github.event.inputs.version || github.ref_name }}"
-        VERSION="${VERSION#v}"
-        
-        # 下载linuxdeploy
-        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-        chmod +x linuxdeploy-x86_64.AppImage
-        
-        # 创建AppDir
-        mkdir -p AppDir/usr/bin
-        mkdir -p AppDir/usr/share/applications
-        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-        
-        # 复制文件
-        cp "dist/ProcessKeyGuide" AppDir/usr/bin/
-        cp "README.md" AppDir/
-        cp "LICENSE" AppDir/
-        
-        # 创建.desktop文件
-        cat > AppDir/usr/share/applications/process-key-guide.desktop << EOF
+        cat > "dist/${{ env.APP_NAME }}.desktop" << EOF
         [Desktop Entry]
-        Name=Process Key Guide
-        Comment=工序按键引导程序
-        Exec=ProcessKeyGuide
-        Icon=process-key-guide
+        Name=${{ env.APP_DISPLAY_NAME }}
+        Comment=${{ env.APP_DESCRIPTION }}
+        Exec=/usr/bin/${{ env.APP_NAME }}
         Type=Application
-        Categories=Utility;
+        Categories=Game;Utility;
+        Keywords=game;skill;training;assistant;prompt
+        Terminal=false
+        StartupNotify=true
         EOF
+    
+    - name: Create game config examples for Linux
+      run: |
+        mkdir -p dist/game_configs
         
-        # 创建图标文件（如果有）
-        # cp "assets/icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/process-key-guide.png
+        # 创建Linux专用的游戏示例
+        cat > "dist/game_configs/linux_gaming.saap" << EOF
+        # Linux Gaming Examples
+        # Linux平台游戏配置示例
         
-        # 生成AppImage
-        ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
+        [metadata]
+        platform = "Linux"
+        description = "Linux gaming configuration examples"
+        author = "SAAP Team"
         
-        # 重命名
-        mv ProcessKeyGuide*.AppImage "dist/ProcessKeyGuide-v${VERSION}-linux.AppImage"
+        [proton_example]
+        comment = "Steam Proton游戏快捷键配置"
+        processes = [
+          {"display_name": "Steam Overlay", "key": "SHIFT+TAB"},
+          {"display_name": "快速保存", "key": "F5"},
+          {"display_name": "快速加载", "key": "F9"},
+          {"display_name": "截图", "key": "F12"}
+        ]
+        
+        [lutris_example]
+        comment = "Lutris游戏平台配置"
+        processes = [
+          {"display_name": "打开Lutris", "key": "SUPER+L"},
+          {"display_name": "启动游戏", "key": "ENTER"},
+          {"display_name": "游戏菜单", "key": "ESC"},
+          {"display_name": "性能监控", "key": "CTRL+SHIFT+O"}
+        ]
+        EOF
     
     - name: Create Debian package
       run: |
@@ -361,70 +487,156 @@ jobs:
         # 创建包结构
         mkdir -p pkg/usr/bin
         mkdir -p pkg/usr/share/applications
-        mkdir -p pkg/usr/share/doc/process-key-guide
+        mkdir -p pkg/usr/share/doc/${{ env.APP_NAME }}
+        mkdir -p pkg/usr/share/${{ env.APP_NAME }}/game_configs
         
         # 复制文件
-        cp "dist/ProcessKeyGuide" pkg/usr/bin/
-        cp "README.md" pkg/usr/share/doc/process-key-guide/
-        cp "LICENSE" pkg/usr/share/doc/process-key-guide/
+        cp "dist/${{ env.APP_NAME }}" pkg/usr/bin/
+        cp "dist/${{ env.APP_NAME }}.desktop" pkg/usr/share/applications/
+        cp "README.md" pkg/usr/share/doc/${{ env.APP_NAME }}/
+        cp "LICENSE" pkg/usr/share/doc/${{ env.APP_NAME }}/copyright
+        cp -r dist/game_configs/* pkg/usr/share/${{ env.APP_NAME }}/game_configs/ 2>/dev/null || true
         
         # 创建控制文件
         mkdir -p pkg/DEBIAN
         cat > pkg/DEBIAN/control << EOF
-        Package: process-key-guide
-        Version: ${VERSION}
-        Section: utils
+        Package: ${{ env.APP_NAME | lower }}
+        Version: $VERSION
+        Section: games
         Priority: optional
         Architecture: amd64
-        Depends: python3-tk
-        Maintainer: Process Key Guide Team <your-email@example.com>
-        Description: 工序按键引导程序
-         一个用于录制、管理和引导用户按特定顺序执行键盘鼠标操作的GUI应用程序。
+        Depends: python3, python3-tk
+        Recommends: python3-keyboard, python3-mouse
+        Suggests: steam, lutris
+        Maintainer: ${{ env.COMPANY_NAME }} <noreply@example.com>
+        Description: ${{ env.APP_DESCRIPTION }}
+         专门为游戏玩家设计的技能轴辅助提示工具，帮助记忆和执行复杂的技能序列。
+         支持多种游戏类型：
+         - MOBA游戏连招
+         - MMORPG技能循环
+         - FPS游戏操作序列
+         - RTS游戏快捷键
+        
+        Homepage: https://github.com/${{ github.repository }}
         EOF
         
         # 创建安装后脚本
         cat > pkg/DEBIAN/postinst << 'EOF'
         #!/bin/bash
-        # 创建桌面快捷方式
-        cat > /usr/share/applications/process-key-guide.desktop << 'EOD'
-        [Desktop Entry]
-        Name=Process Key Guide
-        Comment=工序按键引导程序
-        Exec=/usr/bin/ProcessKeyGuide
-        Type=Application
-        Categories=Utility;
-        Terminal=false
-        EOD
-        
         # 设置文件权限
-        chmod +x /usr/bin/ProcessKeyGuide
+        chmod +x /usr/bin/${{ env.APP_NAME }}
+        
+        # 更新桌面数据库
+        if [ -x "$(command -v update-desktop-database)" ]; then
+          update-desktop-database /usr/share/applications
+        fi
+        
+        echo "========================================="
+        echo "${{ env.APP_DISPLAY_NAME }} 安装完成！"
+        echo ""
+        echo "使用方法："
+        echo "1. 在终端运行: ${{ env.APP_NAME | lower }}"
+        echo "2. 或从应用程序菜单启动"
+        echo ""
+        echo "游戏配置示例位于："
+        echo "/usr/share/${{ env.APP_NAME }}/game_configs/"
+        echo "========================================="
         EOF
         
         chmod +x pkg/DEBIAN/postinst
         
+        # 创建卸载前脚本
+        cat > pkg/DEBIAN/prerm << 'EOF'
+        #!/bin/bash
+        echo "正在卸载 ${{ env.APP_DISPLAY_NAME }}..."
+        EOF
+        
+        chmod +x pkg/DEBIAN/prerm
+        
         # 构建deb包
-        dpkg-deb --build pkg "dist/process-key-guide_${VERSION}_amd64.deb"
+        dpkg-deb --build pkg "dist/${{ env.APP_NAME | lower }}_${VERSION}_amd64.deb"
+        
+        # 计算校验和
+        DEB_HASH=$(sha256sum "dist/${{ env.APP_NAME | lower }}_${VERSION}_amd64.deb" | awk '{print $1}')
+        echo "LINUX_DEB_SHA256=$DEB_HASH" >> $GITHUB_ENV
     
-    - name: Create Linux ZIP archive
+    - name: Create AppImage
       run: |
         VERSION="${{ github.event.inputs.version || github.ref_name }}"
         VERSION="${VERSION#v}"
-        cd dist && tar -czf "ProcessKeyGuide-v${VERSION}-linux.tar.gz" ProcessKeyGuide README.md LICENSE
+        
+        # 创建AppDir结构
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/applications
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        
+        # 复制文件
+        cp "dist/${{ env.APP_NAME }}" AppDir/usr/bin/
+        cp "dist/${{ env.APP_NAME }}.desktop" AppDir/usr/share/applications/
+        cp "README.md" AppDir/
+        cp "LICENSE" AppDir/
+        cp -r dist/game_configs AppDir/
+        
+        # 创建AppRun脚本
+        cat > AppDir/AppRun << 'EOF'
+        #!/bin/bash
+        HERE="$(dirname "$(readlink -f "${0}")")"
+        cd "$HERE"
+        exec "./usr/bin/${{ env.APP_NAME }}" "$@"
+        EOF
+        
+        chmod +x AppDir/AppRun
+        
+        # 下载linuxdeploy
+        wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        chmod +x linuxdeploy-x86_64.AppImage
+        
+        # 生成AppImage
+        ./linuxdeploy-x86_64.AppImage \
+          --appdir AppDir \
+          --output appimage
+        
+        # 重命名
+        mv ${{ env.APP_DISPLAY_NAME }}*.AppImage "dist/${{ env.APP_NAME }}-v${VERSION}-linux.AppImage"
+        
+        # 计算校验和
+        APPIMAGE_HASH=$(sha256sum "dist/${{ env.APP_NAME }}-v${VERSION}-linux.AppImage" | awk '{print $1}')
+        echo "LINUX_APPIMAGE_SHA256=$APPIMAGE_HASH" >> $GITHUB_ENV
+    
+    - name: Create portable Linux archive
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        
+        # 创建便携版tar.gz
+        cd dist && tar -czf "${{ env.APP_NAME }}-v${VERSION}-linux-portable.tar.gz" \
+          "${{ env.APP_NAME }}" \
+          "${{ env.APP_NAME }}.desktop" \
+          "README.md" \
+          "LICENSE" \
+          "game_configs"
+        
+        # 计算校验和
+        TAR_HASH=$(sha256sum "${{ env.APP_NAME }}-v${VERSION}-linux-portable.tar.gz" | awk '{print $1}')
+        echo "LINUX_TAR_SHA256=$TAR_HASH" >> $GITHUB_ENV
     
     - name: Upload Linux artifacts
       uses: actions/upload-artifact@v4
       with:
         name: linux-build
         path: |
-          dist/ProcessKeyGuide
-          dist/ProcessKeyGuide-*.tar.gz
-          dist/ProcessKeyGuide-*.AppImage
-          dist/process-key-guide_*.deb
+          dist/${{ env.APP_NAME }}
+          dist/${{ env.APP_NAME }}.desktop
+          dist/${{ env.APP_NAME | lower }}_*.deb
+          dist/${{ env.APP_NAME }}-*.AppImage
+          dist/${{ env.APP_NAME }}-*.tar.gz
+        retention-days: 7
   
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
     needs: [build-windows, build-macos, build-linux]
+    if: success()
     
     steps:
     - name: Download all artifacts
@@ -432,82 +644,153 @@ jobs:
       with:
         path: artifacts/
     
-    - name: List artifacts
+    - name: Prepare release assets
       run: |
-        find artifacts/ -type f -name "*" | sort
+        # 创建发布目录
+        mkdir -p release_assets
+        
+        # 收集所有构建文件
+        find artifacts/ -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.tar.gz" \) -exec cp {} release_assets/ \;
+        
+        # 创建校验和文件
+        cd release_assets
+        sha256sum * > SHA256SUMS.txt
+        
+        # 创建版本说明
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        cat > VERSION_INFO.md << EOF
+        # Skill Axis Assistance Prompt $VERSION
+        
+        ## 🎮 专为游戏玩家设计的技能轴辅助工具
+        
+        ### 📥 下载链接
+        
+        **Windows 玩家:**
+        - \`${{ env.APP_NAME }}.exe\` - 便携版，解压即用
+        - \`${{ env.APP_NAME }}-*.zip\` - 完整压缩包（含游戏配置示例）
+        
+        **macOS 玩家:**
+        - \`${{ env.APP_NAME }}-*.dmg\` - 磁盘映像，拖拽安装
+        - \`${{ env.APP_NAME }}-*-macos-portable.zip\` - 便携版
+        
+        **Linux 玩家:**
+        - \`${{ env.APP_NAME | lower }}_*.deb\` - Debian/Ubuntu安装包
+        - \`${{ env.APP_NAME }}-*.AppImage\` - 通用Linux应用
+        - \`${{ env.APP_NAME }}-*-linux-portable.tar.gz\` - 便携版
+        
+        ### 🎯 支持的游戏类型
+        
+        1. **MOBA游戏** (英雄联盟、Dota 2)
+           - 英雄连招序列
+           - 技能释放时机
+           - 物品使用顺序
+        
+        2. **MMORPG游戏** (魔兽世界、最终幻想14)
+           - 职业技能循环
+           - 爆发期技能序列
+           - 团队副本操作流程
+        
+        3. **FPS游戏** (CS:GO、守望先锋)
+           - 武器切换组合
+           - 技能使用顺序
+           - 战术动作序列
+        
+        4. **RTS游戏** (星际争霸2、帝国时代)
+           - 单位生产序列
+           - 建筑建造顺序
+           - 快捷键操作流程
+        
+        5. **格斗游戏** (街头霸王、拳皇)
+           - 连招序列
+           - 必杀技输入
+           - 取消连段
+        
+        ### 🚀 快速开始
+        
+        1. **录制你的技能序列**
+           \`\`\`
+           点击"录制工序" → 按实际游戏操作 → 按ESC结束
+           \`\`\`
+        
+        2. **开始训练**
+           \`\`\`
+           点击"开始引导" → 按提示操作 → 提升肌肉记忆
+           \`\`\`
+        
+        3. **导入游戏配置**
+           \`\`\`
+           使用预置的游戏配置示例快速上手
+           \`\`\`
+        
+        ### 🔧 系统要求
+        
+        | 平台 | 最低要求 | 推荐配置 |
+        |------|----------|----------|
+        | Windows | Windows 10, 4GB RAM | Windows 11, 8GB RAM |
+        | macOS | macOS 10.15, 4GB RAM | macOS 12+, 8GB RAM |
+        | Linux | Ubuntu 20.04, 4GB RAM | Ubuntu 22.04, 8GB RAM |
+        
+        ### 📚 资源链接
+        
+        - 📖 完整文档: [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+        - 🎮 游戏配置示例: \`game_configs/\` 目录
+        - 🐛 问题反馈: [GitHub Issues](https://github.com/${{ github.repository }}/issues)
+        - 💬 社区讨论: [GitHub Discussions](https://github.com/${{ github.repository }}/discussions)
+        
+        ### 🙏 致谢
+        
+        感谢所有游戏玩家和贡献者的支持！
+        
+        特别感谢测试和提供反馈的玩家社区。
+        
+        **快乐游戏，精准操作！** 🎯
+        
+        ---
+        
+        **构建信息:**
+        - 版本: $VERSION
+        - 构建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        - 提交: ${{ github.sha }}
+        - 工作流: ${{ github.workflow }}
+        EOF
+        
+        # 显示文件列表
+        echo "=== Release Assets ==="
+        ls -la
+        echo ""
+        echo "=== SHA256 Checksums ==="
+        cat SHA256SUMS.txt
     
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        name: Release ${{ github.ref_name }}
-        body: |
-          # Process Key Guide ${{ github.ref_name }}
-          
-          ## 🎯 功能特性
-          
-          - ✅ 智能录制键盘鼠标操作
-          - ✅ 支持组合键 (Ctrl, Alt, Shift)
-          - ✅ 独立引导提示窗口
-          - ✅ 循环训练模式
-          - ✅ SAAP专有文件格式
-          
-          ## 📦 下载文件
-          
-          根据您的系统选择相应的版本：
-          
-          ### Windows
-          - `ProcessKeyGuide.exe` - 便携版
-          - `ProcessKeyGuide-windows.zip` - 压缩包
-          - `ProcessKeyGuide-Setup.exe` - 安装程序
-          
-          ### macOS
-          - `ProcessKeyGuide` - 命令行版本
-          - `ProcessKeyGuide-macos.zip` - 压缩包
-          - `ProcessKeyGuide-macos.dmg` - 磁盘映像
-          
-          ### Linux
-          - `ProcessKeyGuide` - 命令行版本
-          - `ProcessKeyGuide-linux.tar.gz` - 压缩包
-          - `process-key-guide_*.deb` - Debian包
-          - `ProcessKeyGuide-linux.AppImage` - AppImage
-          
-          ## 📝 使用说明
-          
-          1. 下载适合您系统的版本
-          2. 运行程序
-          3. 录制或添加工序
-          4. 开始引导训练
-          
-          详细文档请参考 [README.md](README.md)
-          
-          ## 🔧 系统要求
-          
-          - **Windows**: Windows 10 或更高版本
-          - **macOS**: macOS 10.15 或更高版本
-          - **Linux**: 支持tkinter的发行版
-          
-          ## 🙏 感谢
-          
-          感谢所有贡献者和用户的支持！
-          
-          ---
-          
-          **SHA256校验和:**
-          ${{ steps.checksums.outputs.sha256 }}
-          
-          **发布时间:** ${{ github.event.release.published_at || '手动发布' }}
+        name: Release ${{ github.ref_name }} - Skill Axis Assistance Prompt
+        body_path: release_assets/VERSION_INFO.md
         draft: false
         prerelease: false
         files: |
-          artifacts/windows-build/dist/ProcessKeyGuide.exe
-          artifacts/windows-build/dist/ProcessKeyGuide-*.zip
-          artifacts/windows-build/dist/ProcessKeyGuide-Setup.exe
-          artifacts/macos-build/dist/ProcessKeyGuide
-          artifacts/macos-build/dist/ProcessKeyGuide-*.zip
-          artifacts/macos-build/dist/ProcessKeyGuide-*.dmg
-          artifacts/linux-build/dist/ProcessKeyGuide
-          artifacts/linux-build/dist/ProcessKeyGuide-*.tar.gz
-          artifacts/linux-build/dist/ProcessKeyGuide-*.AppImage
-          artifacts/linux-build/dist/process-key-guide_*.deb
+          release_assets/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Send Discord notification
+      if: success()
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        DISCORD_WEBHOOK="${{ secrets.DISCORD_WEBHOOK }}"
+        
+        if [ -n "$DISCORD_WEBHOOK" ]; then
+          curl -H "Content-Type: application/json" \
+            -d "{\"content\": null, \"embeds\": [{\"title\": \"🎮 Skill Axis Assistance Prompt $VERSION 已发布！\",\"description\": \"专为游戏玩家设计的技能轴辅助工具\\n\\n📥 下载链接: https://github.com/${{ github.repository }}/releases/tag/$VERSION\",\"color\": 5814783,\"fields\": [{\"name\": \"🎯 新功能\",\"value\": \"• 游戏专用配置示例\\n• 多平台支持\\n• 改进的录制系统\"},{\"name\": \"🎮 支持游戏\",\"value\": \"MOBA • MMORPG • FPS • RTS • 格斗游戏\"}],\"thumbnail\": {\"url\": \"https://cdn-icons-png.flaticon.com/512/808/808439.png\"}}]}" \
+            $DISCORD_WEBHOOK
+        fi
+    
+    - name: Update version in README
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        sed -i "s/![版本].*/![版本](https:\/\/img.shields.io\/badge\/版本-$VERSION-blue)/" README.md
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add README.md
+        git commit -m "Update version badge to $VERSION [skip ci]" || echo "No changes to commit"
+        git push || echo "Nothing to push"
