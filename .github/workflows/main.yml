@@ -3,80 +3,511 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # 当推送v开头的标签时触发
+      - 'v*.*.*'  # 当推送版本标签时触发
   workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.0)'
+        required: true
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11']
-        
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Display Python version
-      run: python --version
-    
-    - name: Test application
-      run: |
-        python process_guide.py --help 2>&1 || echo "Application started successfully"
-    
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v3
-      with:
-        name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
-        path: |
-          process_data.json
-          *.log
-        retention-days: 1
-
-  package:
-    needs: build
+  build-windows:
+    name: Build for Windows
     runs-on: windows-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     
-    - name: Install PyInstaller
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install -r requirements.txt
         pip install pyinstaller
+        pip install pyinstaller-versionfile  # 用于创建版本信息文件
     
-    - name: Package application with PyInstaller
+    - name: Create version info file (Windows)
       run: |
-        pyinstaller --onefile --windowed --name "ProcessKeyGuide" process_guide.py
-        dir dist
+        $version = if ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
+        $version = $version -replace '^v', ''
+        @"
+        # UTF-8
+        #
+        # For more details about fixed file info 'ffi' see:
+        # https://learn.microsoft.com/en-us/windows/win32/menurc/vs-versioninfo-resource
+        VSVersionInfo(
+          ffi=FixedFileInfo(
+            filevers=($version.Split('.') + @(0, 0))[0..3],
+            prodvers=($version.Split('.') + @(0, 0))[0..3],
+            mask=0x3f,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0)
+          ),
+          kids=[
+            StringFileInfo([
+              StringTable(
+                u'040904B0',
+                [StringStruct(u'CompanyName', u'Process Key Guide'),
+                StringStruct(u'FileDescription', u'工序按键引导程序'),
+                StringStruct(u'FileVersion', u'$version'),
+                StringStruct(u'InternalName', u'ProcessKeyGuide'),
+                StringStruct(u'LegalCopyright', u'Copyright © 2026 Process Key Guide Team'),
+                StringStruct(u'OriginalFilename', u'ProcessKeyGuide.exe'),
+                StringStruct(u'ProductName', u'Process Key Guide'),
+                StringStruct(u'ProductVersion', u'$version')])
+            ]),
+            VarFileInfo([VarStruct(u'Translation', [0x409, 1200])])
+          ]
+        )
+        "@ | Out-File -FilePath version_info.txt -Encoding UTF8
     
-    - name: Create release archive
+    - name: Build with PyInstaller
       run: |
-        cd dist
-        7z a ProcessKeyGuide-windows.zip ProcessKeyGuide.exe
-        dir
+        pyinstaller --onefile --windowed --name "ProcessKeyGuide" ^
+          --icon "assets/icon.ico" ^
+          --version-file "version_info.txt" ^
+          --hidden-import "keyboard" ^
+          --hidden-import "mouse" ^
+          --add-data "README.md;." ^
+          --add-data "requirements.txt;." ^
+          "process_guide.py"
     
-    - name: Upload release artifacts
-      uses: actions/upload-artifact@v3
+    - name: Create Windows installer (可选，使用NSIS)
+      if: success()
+      run: |
+        # 安装NSIS
+        choco install nsis -y
+        
+        # 创建NSIS脚本
+        @"
+        ; NSIS 安装脚本
+        Unicode true
+        Name "Process Key Guide"
+        OutFile "dist\ProcessKeyGuide-Setup.exe"
+        InstallDir "$PROGRAMFILES\Process Key Guide"
+        
+        ; 现代UI 2
+        !include "MUI2.nsh"
+        
+        ; 安装页面设置
+        !insertmacro MUI_PAGE_WELCOME
+        !insertmacro MUI_PAGE_DIRECTORY
+        !insertmacro MUI_PAGE_INSTFILES
+        !insertmacro MUI_PAGE_FINISH
+        
+        ; 卸载页面设置
+        !insertmacro MUI_UNPAGE_WELCOME
+        !insertmacro MUI_UNPAGE_CONFIRM
+        !insertmacro MUI_UNPAGE_INSTFILES
+        !insertmacro MUI_UNPAGE_FINISH
+        
+        ; 设置语言
+        !insertmacro MUI_LANGUAGE "English"
+        !insertmacro MUI_LANGUAGE "SimpChinese"
+        
+        Section "Main"
+          SetOutPath "$INSTDIR"
+          
+          ; 复制文件
+          File "dist\ProcessKeyGuide.exe"
+          File "README.md"
+          File "LICENSE"
+          
+          ; 创建开始菜单快捷方式
+          CreateDirectory "$SMPROGRAMS\Process Key Guide"
+          CreateShortCut "$SMPROGRAMS\Process Key Guide\Process Key Guide.lnk" "$INSTDIR\ProcessKeyGuide.exe"
+          CreateShortCut "$SMPROGRAMS\Process Key Guide\Uninstall.lnk" "$INSTDIR\uninstall.exe"
+          
+          ; 写入卸载信息
+          WriteUninstaller "$INSTDIR\uninstall.exe"
+          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
+            "DisplayName" "Process Key Guide"
+          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
+            "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
+            "Publisher" "Process Key Guide Team"
+          WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide" \
+            "DisplayVersion" "$version"
+        SectionEnd
+        
+        Section "Uninstall"
+          ; 删除文件
+          Delete "$INSTDIR\ProcessKeyGuide.exe"
+          Delete "$INSTDIR\README.md"
+          Delete "$INSTDIR\LICENSE"
+          Delete "$INSTDIR\uninstall.exe"
+          
+          ; 删除目录
+          RMDir "$INSTDIR"
+          
+          ; 删除开始菜单快捷方式
+          Delete "$SMPROGRAMS\Process Key Guide\Process Key Guide.lnk"
+          Delete "$SMPROGRAMS\Process Key Guide\Uninstall.lnk"
+          RMDir "$SMPROGRAMS\Process Key Guide"
+          
+          ; 删除注册表项
+          DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ProcessKeyGuide"
+        SectionEnd
+        "@ | Out-File -FilePath installer.nsi -Encoding UTF8
+        
+        # 编译安装程序
+        makensis installer.nsi
+    
+    - name: Create ZIP archive
+      run: |
+        $version = if ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
+        $version = $version -replace '^v', ''
+        Compress-Archive -Path "dist\ProcessKeyGuide.exe", "README.md", "LICENSE" -DestinationPath "dist\ProcessKeyGuide-v$version-windows.zip" -Force
+    
+    - name: Upload Windows artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: ProcessKeyGuide-windows
-        path: dist/ProcessKeyGuide-windows.zip
+        name: windows-build
+        path: |
+          dist/ProcessKeyGuide.exe
+          dist/ProcessKeyGuide-*.zip
+          dist/ProcessKeyGuide-Setup.exe
+  
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install -r requirements.txt
+        pip3 install pyinstaller
+    
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --onefile --windowed --name "ProcessKeyGuide" \
+          --hidden-import "keyboard" \
+          --hidden-import "mouse" \
+          --add-data "README.md:." \
+          --add-data "requirements.txt:." \
+          "process_guide.py"
+    
+    - name: Create macOS app bundle
+      run: |
+        mkdir -p "ProcessKeyGuide.app/Contents/MacOS"
+        mkdir -p "ProcessKeyGuide.app/Contents/Resources"
+        
+        # 复制可执行文件
+        cp "dist/ProcessKeyGuide" "ProcessKeyGuide.app/Contents/MacOS/ProcessKeyGuide"
+        
+        # 创建Info.plist
+        cat > "ProcessKeyGuide.app/Contents/Info.plist" << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleExecutable</key>
+          <string>ProcessKeyGuide</string>
+          <key>CFBundleIdentifier</key>
+          <string>com.processkeyguide.app</string>
+          <key>CFBundleName</key>
+          <string>Process Key Guide</string>
+          <key>CFBundleVersion</key>
+          <string>1.0.0</string>
+          <key>CFBundleShortVersionString</key>
+          <string>1.0.0</string>
+          <key>CFBundlePackageType</key>
+          <string>APPL</string>
+          <key>LSMinimumSystemVersion</key>
+          <string>10.15</string>
+          <key>NSHighResolutionCapable</key>
+          <true/>
+          <key>NSHumanReadableCopyright</key>
+          <string>Copyright © 2026 Process Key Guide Team</string>
+        </dict>
+        </plist>
+        EOF
+        
+        # 复制文档
+        cp "README.md" "ProcessKeyGuide.app/Contents/Resources/"
+        cp "LICENSE" "ProcessKeyGuide.app/Contents/Resources/"
+        
+        # 设置权限
+        chmod +x "ProcessKeyGuide.app/Contents/MacOS/ProcessKeyGuide"
+    
+    - name: Create DMG package
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        
+        # 创建临时目录
+        mkdir -p dmg_build
+        
+        # 复制应用
+        cp -r "ProcessKeyGuide.app" dmg_build/
+        cp "README.md" dmg_build/
+        cp "LICENSE" dmg_build/
+        
+        # 创建软链接到Applications
+        ln -s /Applications dmg_build/
+        
+        # 创建DMG
+        hdiutil create -volname "Process Key Guide" \
+          -srcfolder dmg_build \
+          -ov -format UDZO \
+          "dist/ProcessKeyGuide-v${VERSION}-macos.dmg"
+    
+    - name: Create ZIP archive for macOS
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        cd dist && zip -r "ProcessKeyGuide-v${VERSION}-macos.zip" ProcessKeyGuide
+    
+    - name: Upload macOS artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-build
+        path: |
+          dist/ProcessKeyGuide
+          dist/ProcessKeyGuide-*.zip
+          dist/ProcessKeyGuide-*.dmg
+  
+  build-linux:
+    name: Build for Linux
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk
+        python3 -m pip install --upgrade pip
+        pip3 install -r requirements.txt
+        pip3 install pyinstaller
+    
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --onefile --name "ProcessKeyGuide" \
+          --hidden-import "keyboard" \
+          --hidden-import "mouse" \
+          --add-data "README.md:." \
+          --add-data "requirements.txt:." \
+          "process_guide.py"
+    
+    - name: Create AppImage (可选)
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        
+        # 下载linuxdeploy
+        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        chmod +x linuxdeploy-x86_64.AppImage
+        
+        # 创建AppDir
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/applications
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        
+        # 复制文件
+        cp "dist/ProcessKeyGuide" AppDir/usr/bin/
+        cp "README.md" AppDir/
+        cp "LICENSE" AppDir/
+        
+        # 创建.desktop文件
+        cat > AppDir/usr/share/applications/process-key-guide.desktop << EOF
+        [Desktop Entry]
+        Name=Process Key Guide
+        Comment=工序按键引导程序
+        Exec=ProcessKeyGuide
+        Icon=process-key-guide
+        Type=Application
+        Categories=Utility;
+        EOF
+        
+        # 创建图标文件（如果有）
+        # cp "assets/icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/process-key-guide.png
+        
+        # 生成AppImage
+        ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
+        
+        # 重命名
+        mv ProcessKeyGuide*.AppImage "dist/ProcessKeyGuide-v${VERSION}-linux.AppImage"
+    
+    - name: Create Debian package
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        
+        # 创建包结构
+        mkdir -p pkg/usr/bin
+        mkdir -p pkg/usr/share/applications
+        mkdir -p pkg/usr/share/doc/process-key-guide
+        
+        # 复制文件
+        cp "dist/ProcessKeyGuide" pkg/usr/bin/
+        cp "README.md" pkg/usr/share/doc/process-key-guide/
+        cp "LICENSE" pkg/usr/share/doc/process-key-guide/
+        
+        # 创建控制文件
+        mkdir -p pkg/DEBIAN
+        cat > pkg/DEBIAN/control << EOF
+        Package: process-key-guide
+        Version: ${VERSION}
+        Section: utils
+        Priority: optional
+        Architecture: amd64
+        Depends: python3-tk
+        Maintainer: Process Key Guide Team <your-email@example.com>
+        Description: 工序按键引导程序
+         一个用于录制、管理和引导用户按特定顺序执行键盘鼠标操作的GUI应用程序。
+        EOF
+        
+        # 创建安装后脚本
+        cat > pkg/DEBIAN/postinst << 'EOF'
+        #!/bin/bash
+        # 创建桌面快捷方式
+        cat > /usr/share/applications/process-key-guide.desktop << 'EOD'
+        [Desktop Entry]
+        Name=Process Key Guide
+        Comment=工序按键引导程序
+        Exec=/usr/bin/ProcessKeyGuide
+        Type=Application
+        Categories=Utility;
+        Terminal=false
+        EOD
+        
+        # 设置文件权限
+        chmod +x /usr/bin/ProcessKeyGuide
+        EOF
+        
+        chmod +x pkg/DEBIAN/postinst
+        
+        # 构建deb包
+        dpkg-deb --build pkg "dist/process-key-guide_${VERSION}_amd64.deb"
+    
+    - name: Create Linux ZIP archive
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        VERSION="${VERSION#v}"
+        cd dist && tar -czf "ProcessKeyGuide-v${VERSION}-linux.tar.gz" ProcessKeyGuide README.md LICENSE
+    
+    - name: Upload Linux artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-build
+        path: |
+          dist/ProcessKeyGuide
+          dist/ProcessKeyGuide-*.tar.gz
+          dist/ProcessKeyGuide-*.AppImage
+          dist/process-key-guide_*.deb
+  
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-macos, build-linux]
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+    
+    - name: List artifacts
+      run: |
+        find artifacts/ -type f -name "*" | sort
     
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/v')
       with:
-        files: dist/ProcessKeyGuide-windows.zip
-        generate_release_notes: true
+        name: Release ${{ github.ref_name }}
+        body: |
+          # Process Key Guide ${{ github.ref_name }}
+          
+          ## 🎯 功能特性
+          
+          - ✅ 智能录制键盘鼠标操作
+          - ✅ 支持组合键 (Ctrl, Alt, Shift)
+          - ✅ 独立引导提示窗口
+          - ✅ 循环训练模式
+          - ✅ SAAP专有文件格式
+          
+          ## 📦 下载文件
+          
+          根据您的系统选择相应的版本：
+          
+          ### Windows
+          - `ProcessKeyGuide.exe` - 便携版
+          - `ProcessKeyGuide-windows.zip` - 压缩包
+          - `ProcessKeyGuide-Setup.exe` - 安装程序
+          
+          ### macOS
+          - `ProcessKeyGuide` - 命令行版本
+          - `ProcessKeyGuide-macos.zip` - 压缩包
+          - `ProcessKeyGuide-macos.dmg` - 磁盘映像
+          
+          ### Linux
+          - `ProcessKeyGuide` - 命令行版本
+          - `ProcessKeyGuide-linux.tar.gz` - 压缩包
+          - `process-key-guide_*.deb` - Debian包
+          - `ProcessKeyGuide-linux.AppImage` - AppImage
+          
+          ## 📝 使用说明
+          
+          1. 下载适合您系统的版本
+          2. 运行程序
+          3. 录制或添加工序
+          4. 开始引导训练
+          
+          详细文档请参考 [README.md](README.md)
+          
+          ## 🔧 系统要求
+          
+          - **Windows**: Windows 10 或更高版本
+          - **macOS**: macOS 10.15 或更高版本
+          - **Linux**: 支持tkinter的发行版
+          
+          ## 🙏 感谢
+          
+          感谢所有贡献者和用户的支持！
+          
+          ---
+          
+          **SHA256校验和:**
+          ${{ steps.checksums.outputs.sha256 }}
+          
+          **发布时间:** ${{ github.event.release.published_at || '手动发布' }}
+        draft: false
+        prerelease: false
+        files: |
+          artifacts/windows-build/dist/ProcessKeyGuide.exe
+          artifacts/windows-build/dist/ProcessKeyGuide-*.zip
+          artifacts/windows-build/dist/ProcessKeyGuide-Setup.exe
+          artifacts/macos-build/dist/ProcessKeyGuide
+          artifacts/macos-build/dist/ProcessKeyGuide-*.zip
+          artifacts/macos-build/dist/ProcessKeyGuide-*.dmg
+          artifacts/linux-build/dist/ProcessKeyGuide
+          artifacts/linux-build/dist/ProcessKeyGuide-*.tar.gz
+          artifacts/linux-build/dist/ProcessKeyGuide-*.AppImage
+          artifacts/linux-build/dist/process-key-guide_*.deb
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
